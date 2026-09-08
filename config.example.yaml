@@ -1,9 +1,6 @@
-# Example configuration for Video-to-Shorts
-# Copy this file to config.yaml and edit as needed.
-
 project:
-  name: "video-to-shorts"
-  version: "0.1.0"
+  name: "ICF"
+  version: "0.2.0"
 
 paths:
   input_dir: "input"
@@ -11,31 +8,37 @@ paths:
   temp_dir: "temp"
 
 ffmpeg:
-  # Leave empty if ffmpeg is in PATH, otherwise put full path
-  # Example for Windows: "C:/ffmpeg/bin/ffmpeg.exe"
+  # Empty = FFmpeg must be available in PATH.
+  #
+  # Windows example:
+  # executable: "C:/ffmpeg/bin/ffmpeg.exe"
   executable: ""
-  
-  # Default vertical resolution
+
   width: 1080
   height: 1920
-  
-  # Video codec settings (good quality / reasonable size)
   video_codec: "libx264"
   crf: 20
   preset: "medium"
   audio_codec: "aac"
   audio_bitrate: "128k"
 
-# Future stages (not used yet)
-whisper:
-  model: "medium"          # tiny / base / small / medium / large-v2
-  language: "en"
+analysis:
+  sample_interval: 1.5
+  max_candidates: 100
+  event_padding_before: 3.0
+  event_padding_after: 4.0
 
-llm:
-  provider: "remote"       # "remote" for now (Ollama later)
-  model: "llama3.2"
+transcription:
+  enabled: true
+  model: "small"
+  device: "cpu"
+  compute_type: "int8"
+
+ai:
+  vision_provider: "none"
+  reasoning_provider: "none"
 
 shorts:
-  min_duration: 15         # seconds
+  min_duration: 15
   max_duration: 59
   target_count: 6

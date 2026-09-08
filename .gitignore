@@ -1,46 +1,24 @@
-# Temporary & output (keep the folders, ignore contents)
-temp/*
-!temp/.gitkeep
-output/*
-!output/.gitkeep
-*.mp4
-*.mkv
-*.avi
-*.mov
-*.wav
-*.mp3
-
-# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
 .venv/
-ENV/
+.env
 
-# Models & large files
+config.yaml
+
+input/*
+!input/.gitkeep
+
+output/*
+!output/.gitkeep
+
+temp/*
+!temp/.gitkeep
+
 models/*
 !models/.gitkeep
-*.bin
-*.gguf
-*.pt
-*.pth
-*.onnx
 
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Config with secrets (if any later)
-config.yaml
-.env
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
