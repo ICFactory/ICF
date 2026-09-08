@@ -1,109 +1,147 @@
-# Local AI Video-to-Shorts System
+# Intelligent Content Factory (ICF)
 
-**Goal**: Turn one long video into multiple polished vertical Shorts (9:16) with captions, original AI commentary, effects, titles, descriptions and hashtags — completely local and free after the initial setup.
+ICF is an AI-powered video-to-Shorts system that takes a long-form video, finds the best moments, and turns them into polished vertical Shorts.
 
-## Current Status (Phase 0 → Phase 1)
+The goal is to automate the process from **long video → intelligent moment selection → editing → finished Shorts → metadata**.
 
-We are building this **incrementally**.  
-Right now we only have the basic **FFmpeg video engine**.
+## Current Approach
 
-### Hardware Reality (Your Machine)
-- Windows 7 Ultimate SP1
-- Intel i7-3632QM (2012)
-- 8 GB RAM
+ICF uses a **hybrid architecture**:
 
-Because of these limits:
-- Full local LLM (Ollama) and modern Whisper are **not practical** on this PC.
-- We develop and test almost everything **remotely** (this environment + GitHub).
-- On your Windows 7 machine you only need **portable FFmpeg**.
+* **Local/open-source tools** where they are practical and efficient
+* **Cloud AI** where stronger vision, reasoning, or other AI capabilities are useful
+* **FFmpeg** for reliable video/audio processing and rendering
+* **GitHub Codespaces** as the primary development environment
+
+The system is designed so individual AI components can be replaced without rebuilding the entire pipeline.
+
+## What We Have Achieved
+
+### Phase 1 — Video Engine
+
+* GitHub repository and Codespaces development environment
+* FFmpeg installed and working in Codespaces
+* Basic video clipping
+* Precise timestamp support, including milliseconds
+* 9:16 vertical conversion
+* 1080×1920 output
+* Original audio preservation
+* Single-clip generation working
+* Multi-clip generation script added
+* Batch generation from multiple timestamp ranges working
+
+### Phase 2 — Transcription
+
+* `faster-whisper` installed in Codespaces
+* Local transcription pipeline implemented
+* Timestamped transcript generation
+* Audio extraction through FFmpeg
+* Language detection
+
+## What Remains
+
+The main intelligent part of ICF is still being built.
+
+* Multimodal video analysis
+* Visual/keyframe analysis
+* Hybrid Vision AI
+* Intelligent moment detection
+* AI-based clip scoring and ranking
+* Accurate automatic clip boundaries
+* Duplicate/overlap control
+* Smart vertical framing
+* Automatic captions
+* AI-generated original commentary
+* Text-to-speech
+* Automatic video enhancements
+* Final Short assembly
+* Title, description and hashtag generation
+* End-to-end automated pipeline
+* YouTube publishing
 
 ## Project Structure
 
-```
-video-to-shorts/
+```text
+ICF/
 ├── README.md
-├── .gitignore
 ├── config.example.yaml
+├── .gitignore
 ├── scripts/
-│   ├── 01_basic_clip.py          # Extract + convert one clip to vertical
-│   ├── 01_basic_clip.bat         # Easy Windows launcher
-│   └── utils/
-├── input/                        # Put your long videos here
-├── output/                       # Finished Shorts appear here
-├── temp/                         # Temporary files (auto-cleaned later)
-├── models/                       # Future: local models
+│   ├── 01_basic_clip.py
+│   ├── 01_basic_clip.bat
+│   └── 02_multi_clips.py
+├── input/
+│   └── .gitkeep
+├── output/
+│   └── .gitkeep
+├── temp/
+├── models/
 └── docs/
 ```
 
-## What You Need on Windows 7 (Minimal)
+The `input/`, `output/`, `temp/`, and `models/` directories are intended to support the processing pipeline as it grows.
 
-### 1. Portable FFmpeg (Required)
+## Development Environment
 
-1. Go to: https://www.gyan.dev/ffmpeg/builds/
-2. Download the **essentials** build (Windows 7 compatible).
-3. Extract it to `C:\ffmpeg` (or any folder you like).
-4. Test:
-   ```bat
-   C:\ffmpeg\bin\ffmpeg.exe -version
-   ```
+Development is primarily done in **GitHub Codespaces**.
 
-### 2. (Optional) Old Git for Windows
-Only if you want `git` commands locally.  
-Latest version that still supports Windows 7 is **2.46.2**.
+The Windows 7 machine is kept lightweight. Heavy development and AI processing are not tied to the local machine.
 
-You can also just download ZIP files from GitHub — no Git needed.
+Current development stack includes:
 
-## How to Use the Current Phase 1 Script
+* Python
+* FFmpeg
+* faster-whisper
+* GitHub Codespaces
+* Pluggable AI/LLM services
+* Hybrid local/cloud Vision AI
 
-### Easy way (Windows)
+## Roadmap
 
-1. Put a long video in the `input` folder (example: `input/long_video.mp4`).
-2. Edit `scripts/01_basic_clip.bat` and change the times if you want.
-3. Double-click `scripts/01_basic_clip.bat`  
-   or run it from Command Prompt.
+### Phase 1 — Video Engine ✓
 
-### Advanced (Python – only if you have Python 3.8)
+Basic clipping, vertical conversion and batch clip generation.
 
-```bash
-python scripts/01_basic_clip.py --input input/long_video.mp4 --start 00:04:30 --end 00:04:55 --output output/short_01.mp4
-```
+### Phase 2 — Transcription ✓
 
-The script will:
-- Cut the selected part
-- Convert to 1080×1920 (9:16) with center crop
-- Keep original audio
-- Output a clean vertical MP4
+Timestamped speech transcription using faster-whisper.
 
-## Development Workflow (Recommended)
+### Phase 3 — Multimodal Analysis
 
-1. All real development happens in this GitHub repository + remote environment.
-2. You only download the latest code when you want to test on your machine.
-3. Heavy AI steps (transcription, moment selection, commentary) will be designed so they can run:
-   - Remotely / on free cloud (Colab, Codespaces)
-   - Or later on a better computer
+Combine transcript, audio and visual information to understand what is happening in the video.
 
-## Roadmap (from original brief)
+### Phase 4 — Intelligent Selection
 
-- [x] Phase 0 – Environment understanding
-- [ ] Phase 1 – Basic FFmpeg video engine   ← **we are here**
-- [ ] Phase 2 – Transcription (standalone Faster-Whisper or remote)
-- [ ] Phase 3 – Local / remote LLM clip selector
-- [ ] Phase 4 – Automated clipping
-- [ ] Phase 5 – Captions
-- [ ] Phase 6 – AI Commentary + TTS
-- [ ] Phase 7 – Full Short editor
-- [ ] Phase 8 – Metadata (title / description / hashtags)
-- [ ] Phase 9 – YouTube upload
-- [ ] Phase 10 – Full content factory
+Find, score and rank the strongest moments automatically.
 
-## Next Steps
+### Phase 5 — Smart Clip Boundaries
 
-After you confirm FFmpeg works on your machine, we will:
-1. Improve the vertical conversion (better smart crop later)
-2. Add batch processing
-3. Start the transcription stage
+Determine where each Short should actually start and end.
 
----
+### Phase 6 — Short Editor
 
-**Created for the Local AI Automated Video-to-Shorts project**  
-Keep it simple. Keep it local where possible. Keep it free.
+Automatically handle framing, captions, effects, audio and other enhancements.
+
+### Phase 7 — AI Commentary
+
+Generate original commentary and voice narration.
+
+### Phase 8 — Metadata
+
+Generate titles, descriptions and hashtags.
+
+### Phase 9 — Complete Pipeline
+
+One long video → multiple finished Shorts + metadata.
+
+### Phase 10 — Publishing & Expansion
+
+YouTube API, monitoring, scheduling and eventually additional platforms.
+
+## First Major Goal
+
+The first major milestone is simple:
+
+**One long video → AI understands it → selects the best moments → creates several polished Shorts automatically.**
+
+Everything else comes after that.
