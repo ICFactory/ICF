@@ -1,147 +1,115 @@
-# Intelligent Content Factory (ICF)
+# ICF — Local AI Automated Video-to-Shorts System
 
-ICF is an AI-powered video-to-Shorts system that takes a long-form video, finds the best moments, and turns them into polished vertical Shorts.
+A local-first, automated pipeline that takes one long-form video and produces
+multiple polished short-form videos (YouTube Shorts style) — with no recurring
+AI/API costs for the core pipeline.
 
-The goal is to automate the process from **long video → intelligent moment selection → editing → finished Shorts → metadata**.
+## Objective
 
-## Current Approach
+Build a local, automated AI video-processing system that:
 
-ICF uses a **hybrid architecture**:
+- Analyzes a long video
+- Transcribes its speech
+- Identifies the strongest/most interesting moments (audio, visual, or both)
+- Extracts multiple clips
+- Converts them to vertical (9:16) format
+- Automatically edits them (captions, commentary, effects)
+- Generates titles/descriptions/hashtags
+- Eventually publishes to YouTube
 
-* **Local/open-source tools** where they are practical and efficient
-* **Cloud AI** where stronger vision, reasoning, or other AI capabilities are useful
-* **FFmpeg** for reliable video/audio processing and rendering
-* **GitHub Codespaces** as the primary development environment
+The system is **content-agnostic** — no hardcoded logic for "baby", "funny",
+"football", etc. The intelligence layer determines the event type dynamically,
+so the same pipeline works across bloopers, accidents, car stunts, football,
+wildlife, sports, interviews, reactions, fails, and similar long-form content.
 
-The system is designed so individual AI components can be replaced without rebuilding the entire pipeline.
+## What is NOT in scope yet (Phase 2/3)
 
-## What We Have Achieved
+- Automatically monitoring/downloading from YouTube channels at scale
+- TikTok / Facebook / Instagram / Snapchat publishing
+- Multiple accounts, analytics, automatic scheduling
+- Cloud deployment, Android app, multi-machine processing
 
-### Phase 1 — Video Engine
+## Architecture decisions
 
-* GitHub repository and Codespaces development environment
-* FFmpeg installed and working in Codespaces
-* Basic video clipping
-* Precise timestamp support, including milliseconds
-* 9:16 vertical conversion
-* 1080×1920 output
-* Original audio preservation
-* Single-clip generation working
-* Multi-clip generation script added
-* Batch generation from multiple timestamp ranges working
+- **OS / hardware**: Windows PC, Intel i7, 8GB RAM, no dedicated GPU. CPU-only
+  for now; benchmark before buying hardware. Recommended eventual RAM: 16GB
+  minimum, 32GB preferred.
+- **Video editing/rendering**: FFmpeg does all the actual video work (cutting,
+  resizing, 9:16 conversion, cropping, text, subtitles, audio mixing,
+  encoding). The AI layer only *decides* what to do — FFmpeg *performs* it.
+  This keeps processing fast and avoids unnecessary AI compute.
+- **Transcription**: faster-whisper, fully local, produces timestamped
+  transcripts used to locate clip boundaries.
+- **Moment selection (text)**: local LLM via Ollama — analyzes transcripts,
+  scores potential clips, generates hooks/commentary/titles/descriptions/
+  hashtags. No external API required for these text operations.
+- **Moment selection (visual)** — for content where transcript alone isn't
+  enough (animal fails, physical comedy, accidents, sports, reactions):
+  a **hybrid, mostly-local** approach was chosen over pure local or pure
+  cloud vision:
+  1. Extract candidate keyframes **locally and for free** using FFmpeg/OpenCV,
+     combining four signals: fixed-interval base sampling, motion spikes
+     (frame differencing), audio energy spikes (RMS loudness), and
+     ffmpeg's native scene-change detection.
+  2. Deduplicate near-identical frames locally (cheap average-hash comparison)
+     before anything leaves the machine.
+  3. Only the surviving, meaningful keyframes are sent to a vision model
+     (Gemini Flash free tier) for description — kept far under typical daily
+     free-tier limits.
+  4. Combine vision descriptions + transcript + audio energy locally to make
+     the final moment-selection decision.
+  5. A fully local vision model can replace the cloud step later as
+     open-source vision models improve.
+  - Result: ~80–90% of the work stays local; cloud is used only where it adds
+    real value.
+- **Commentary**: local LLM generates an original commentary script for a
+  selected clip → local TTS renders voice audio → FFmpeg mixes it into the
+  final video, so the system never just reposts raw clips.
 
-### Phase 2 — Transcription
+## Current status
 
-* `faster-whisper` installed in Codespaces
-* Local transcription pipeline implemented
-* Timestamped transcript generation
-* Audio extraction through FFmpeg
-* Language detection
+### Done
 
-## What Remains
+- Project brief and architecture finalized (this document).
+- **Smart local keyframe extractor** (`scripts/05_extract_keyframes.py`)
+  — implemented and tested against a real ~3-minute video:
+  - Combines base sampling + motion detection + audio energy + scene-change
+    detection.
+  - Merges/caps candidates and removes near-duplicate frames via perceptual
+    hashing.
+  - Outputs a `manifest.json` per run listing every kept frame's timestamp
+    and which signal(s) triggered it.
+  - Verified end-to-end run: 189s video → 212 raw candidates → 150 after
+    merge/cap → 106 kept after dedup.
+- Initial `app/` package scaffolding created (`app/core`, `app/media`,
+  `app/ai/providers`, `app/pipeline`, `app/cli.py`, `run_icf.py`) as the
+  foundation for the content-agnostic core architecture, alongside legacy
+  reference scripts (`scripts/02_multi_clips.py`, `03_transcribe.py`,
+  `04_auto_select_clips.py`, `05_smart_video_analysis.py`).
 
-The main intelligent part of ICF is still being built.
+### Remaining
 
-* Multimodal video analysis
-* Visual/keyframe analysis
-* Hybrid Vision AI
-* Intelligent moment detection
-* AI-based clip scoring and ranking
-* Accurate automatic clip boundaries
-* Duplicate/overlap control
-* Smart vertical framing
-* Automatic captions
-* AI-generated original commentary
-* Text-to-speech
-* Automatic video enhancements
-* Final Short assembly
-* Title, description and hashtag generation
-* End-to-end automated pipeline
-* YouTube publishing
+- Reconcile `scripts/05_smart_video_analysis.py` (legacy) with the new
+  `scripts/05_extract_keyframes.py` — confirm no duplicated responsibility.
+- Build the **vision description step**: send surviving keyframes to Gemini
+  Flash free tier (or a local vision model later) and capture per-keyframe
+  descriptions.
+- Build **moment scoring/selection**: combine vision descriptions +
+  transcript (faster-whisper) + audio energy into a ranked list of best
+  moments with timestamp, reason, and hook.
+- Integrate the keyframe extractor and upcoming vision/scoring steps into the
+  `app/pipeline/` architecture (currently only scaffolding exists).
+- Automatic editing engine (smart crop, 9:16 conversion, subject positioning,
+  zoom/pan, animated captions, hook/ending text) via FFmpeg.
+- AI commentary generation (local LLM script → local TTS → FFmpeg mix).
+- Title/description/hashtag generation per Short.
+- Manual-inspection step before any YouTube upload; YouTube API integration
+  deferred until the generation pipeline is reliable.
 
-## Project Structure
+## Working rules
 
-```text
-ICF/
-├── README.md
-├── config.example.yaml
-├── .gitignore
-├── scripts/
-│   ├── 01_basic_clip.py
-│   ├── 01_basic_clip.bat
-│   └── 02_multi_clips.py
-├── input/
-│   └── .gitkeep
-├── output/
-│   └── .gitkeep
-├── temp/
-├── models/
-└── docs/
-```
-
-The `input/`, `output/`, `temp/`, and `models/` directories are intended to support the processing pipeline as it grows.
-
-## Development Environment
-
-Development is primarily done in **GitHub Codespaces**.
-
-The Windows 7 machine is kept lightweight. Heavy development and AI processing are not tied to the local machine.
-
-Current development stack includes:
-
-* Python
-* FFmpeg
-* faster-whisper
-* GitHub Codespaces
-* Pluggable AI/LLM services
-* Hybrid local/cloud Vision AI
-
-## Roadmap
-
-### Phase 1 — Video Engine ✓
-
-Basic clipping, vertical conversion and batch clip generation.
-
-### Phase 2 — Transcription ✓
-
-Timestamped speech transcription using faster-whisper.
-
-### Phase 3 — Multimodal Analysis
-
-Combine transcript, audio and visual information to understand what is happening in the video.
-
-### Phase 4 — Intelligent Selection
-
-Find, score and rank the strongest moments automatically.
-
-### Phase 5 — Smart Clip Boundaries
-
-Determine where each Short should actually start and end.
-
-### Phase 6 — Short Editor
-
-Automatically handle framing, captions, effects, audio and other enhancements.
-
-### Phase 7 — AI Commentary
-
-Generate original commentary and voice narration.
-
-### Phase 8 — Metadata
-
-Generate titles, descriptions and hashtags.
-
-### Phase 9 — Complete Pipeline
-
-One long video → multiple finished Shorts + metadata.
-
-### Phase 10 — Publishing & Expansion
-
-YouTube API, monitoring, scheduling and eventually additional platforms.
-
-## First Major Goal
-
-The first major milestone is simple:
-
-**One long video → AI understands it → selects the best moments → creates several polished Shorts automatically.**
-
-Everything else comes after that.
+- Ask before writing code; get approval; then deliver a full implementation
+  chunk rather than incremental baby steps.
+- Keep the core content-agnostic — no per-category hardcoding.
+- No unnecessary documentation or long planning essays — update this README
+  when status changes instead.
