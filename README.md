@@ -71,7 +71,7 @@ under the table.
 | 2 | `scripts/06_score_moments.py` | Score keyframes by which local signals fired, merge nearby frames into candidate time-range **events**. Output: `events.json` |
 | 3 | `scripts/07_describe_moments.py` | Send each event's peak frame to Gemini 3.6 Flash for a neutral visual description. Checkpointed/cached to survive small free-tier quotas. Output: `events_described.json` |
 | 4 | `scripts/08_select_moments.py` | Filter out non-content events, optionally blend in transcript overlap + local Ollama judgment, rank final candidate clips. Output: `selected_clips.json` |
-| 5 | *(next)* | Cut, crop to 9:16, and encode the selected clips — pure FFmpeg, no AI calls |
+| 5 | `scripts/09_cut_clips.py` | Cut, crop to 9:16, and encode the selected clips — pure FFmpeg, no AI calls |
 
 **Note on `05_*`:** there are two scripts starting with `05` in `scripts/`.
 Only `05_extract_keyframes.py` is active. `05_smart_video_analysis.py` is
@@ -97,6 +97,10 @@ wired into the pipeline as a script call), `04_auto_select_clips.py`,
   card.
 - Vision descriptions confirmed accurate on real footage, including
   correctly identifying and excluding a title/outro card as non-content.
+- **Full pipeline (steps 1–5) run end-to-end on the real ~189s test video**,
+  producing 3 final, playable, correctly-cropped 9:16 clips (no distortion,
+  confirmed visually) with no manual intervention beyond running each
+  script in order.
 - Initial `app/` package scaffolding created (`app/core`, `app/media`,
   `app/ai/providers`, `app/pipeline`, `app/cli.py`, `run_icf.py`) as the
   foundation for wiring the scripts above into a single application later.
@@ -106,8 +110,17 @@ wired into the pipeline as a script call), `04_auto_select_clips.py`,
 - Wire `03_transcribe.py`'s output into `08_select_moments.py`'s
   `--transcript` option (confirm output format matches; not yet tested
   together).
-- Build the **clip-cutting step**: pure FFmpeg, takes `selected_clips.json`
-  start/end timestamps, crops/resizes to 9:16, encodes final clip files.
+- **Disk-space housekeeping.** Every run writes real files into
+  `output/keyframes/frames/`, `output/events/`, `output/final_clips/`, plus
+  any transcript/temp folders — these grow every run and are never cleaned
+  up automatically. Needed:
+  - A `.gitignore` entry for `output/`, `input/`, and any `temp*/` /
+    `*_tmp*` paths so raw video/image/JSON test artifacts never get
+    committed to the repo (they don't belong in git history).
+  - A cleanup script/flag (e.g. `--clean-intermediate`) that removes
+    per-run keyframe/event frame folders once `final_clips/` has been
+    produced successfully, so only the final output and its manifest are
+    kept long-term.
 - Automatic editing engine (smart crop/subject positioning, zoom/pan,
   animated captions, hook/ending text) via FFmpeg.
 - AI commentary generation (local LLM script → local TTS → FFmpeg mix).

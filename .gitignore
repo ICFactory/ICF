@@ -1,24 +1,27 @@
-__pycache__/
-*.py[cod]
-.venv/
-.env
-
-config.yaml
-
-input/*
+# Source/input videos and generated pipeline output -- never commit these.
+# They are large, per-run, regenerable artifacts, not source code.
+input/
+output/
 !input/.gitkeep
-
-output/*
 !output/.gitkeep
-
-temp/*
-!temp/.gitkeep
-
-models/*
-!models/.gitkeep
-
 *.mp4
-*.mov
-*.mkv
-*.avi
-*.webm
+*.mp4.mp4
+*.wav
+*.jpg
+*.jpeg
+*.png
+
+# Temp / cache
+temp/
+tmp/
+*_tmp*/
+vision_cache.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Env / secrets
+.env
