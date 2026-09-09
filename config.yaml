@@ -1,0 +1,44 @@
+project:
+  name: "ICF"
+  version: "0.2.0"
+
+paths:
+  input_dir: "input"
+  output_dir: "output"
+  temp_dir: "temp"
+
+ffmpeg:
+  # Empty = FFmpeg must be available in PATH.
+  #
+  # Windows example:
+  # executable: "C:/ffmpeg/bin/ffmpeg.exe"
+  executable: ""
+
+  width: 1080
+  height: 1920
+  video_codec: "libx264"
+  crf: 20
+  preset: "medium"
+  audio_codec: "aac"
+  audio_bitrate: "128k"
+
+analysis:
+  sample_interval: 1.5
+  max_candidates: 100
+  event_padding_before: 3.0
+  event_padding_after: 4.0
+
+transcription:
+  enabled: true
+  model: "small"
+  device: "cpu"
+  compute_type: "int8"
+
+ai:
+  vision_provider: "none"
+  reasoning_provider: "none"
+
+shorts:
+  min_duration: 15
+  max_duration: 59
+  target_count: 6
