@@ -1,8 +1,8 @@
 # ICF — Local AI Automated Video-to-Shorts System
 
 A local-first, automated pipeline that takes one long-form video and produces
-multiple polished short-form videos (YouTube Shorts style) — with no recurring
-AI/API costs for the core pipeline.
+multiple polished short-form videos (YouTube Shorts style) — with minimal
+recurring AI/API costs for the core pipeline.
 
 ## Objective
 
@@ -29,80 +29,91 @@ wildlife, sports, interviews, reactions, fails, and similar long-form content.
 - Multiple accounts, analytics, automatic scheduling
 - Cloud deployment, Android app, multi-machine processing
 
-## Architecture decisions
+## Architecture
 
-- **OS / hardware**: Windows PC, Intel i7, 8GB RAM, no dedicated GPU. CPU-only
-  for now; benchmark before buying hardware. Recommended eventual RAM: 16GB
-  minimum, 32GB preferred.
-- **Video editing/rendering**: FFmpeg does all the actual video work (cutting,
-  resizing, 9:16 conversion, cropping, text, subtitles, audio mixing,
-  encoding). The AI layer only *decides* what to do — FFmpeg *performs* it.
-  This keeps processing fast and avoids unnecessary AI compute.
+- **OS / hardware**: Windows PC (via GitHub Codespaces for development),
+  Intel i7, 8GB RAM, no dedicated GPU. CPU-only for now.
+- **Video editing/rendering**: FFmpeg does 100% of the actual video work
+  (cutting, resizing, 9:16 conversion, cropping, text, subtitles, audio
+  mixing, encoding). The AI layer only **decides** what to do — FFmpeg
+  **performs** it. No AI model ever touches pixels/encoding directly; this
+  keeps rendering fast and avoids unnecessary AI compute.
 - **Transcription**: faster-whisper, fully local, produces timestamped
-  transcripts used to locate clip boundaries.
-- **Moment selection (text)**: local LLM via Ollama — analyzes transcripts,
-  scores potential clips, generates hooks/commentary/titles/descriptions/
-  hashtags. No external API required for these text operations.
-- **Moment selection (visual)** — for content where transcript alone isn't
-  enough (animal fails, physical comedy, accidents, sports, reactions):
-  a **hybrid, mostly-local** approach was chosen over pure local or pure
-  cloud vision:
-  1. Extract candidate keyframes **locally and for free** using FFmpeg/OpenCV,
-     combining four signals: fixed-interval base sampling, motion spikes
-     (frame differencing), audio energy spikes (RMS loudness), and
-     ffmpeg's native scene-change detection.
-  2. Deduplicate near-identical frames locally (cheap average-hash comparison)
-     before anything leaves the machine.
-  3. Only the surviving, meaningful keyframes are sent to a vision model
-     (Gemini Flash free tier) for description — kept far under typical daily
-     free-tier limits.
-  4. Combine vision descriptions + transcript + audio energy locally to make
-     the final moment-selection decision.
-  5. A fully local vision model can replace the cloud step later as
-     open-source vision models improve.
-  - Result: ~80–90% of the work stays local; cloud is used only where it adds
-    real value.
-- **Commentary**: local LLM generates an original commentary script for a
+  transcripts used to locate clip boundaries and optionally boost scoring
+  for moments with speech.
+- **Local signal detection**: OpenCV + FFmpeg detect motion, scene changes,
+  and audio energy spikes, entirely locally and for free, before anything
+  is sent to a cloud model.
+- **Vision description**: only the surviving, deduplicated keyframes (a
+  handful per video) are sent to **Gemini 3.6 Flash** (free tier) for a
+  short neutral description of what's visible. Cloud usage is deliberately
+  minimal — this is the only step that leaves the machine.
+- **Moment selection**: combines the local signal score, vision description,
+  and (optionally) overlapping transcript text into a final ranked list of
+  candidate clips. A generic keyword filter excludes non-content frames
+  (title cards, outros, "subscribe" overlays) before ranking. An optional
+  local LLM via **Ollama** can further judge each moment's shareability;
+  the pipeline works fine without Ollama running (heuristic score only).
+- **Commentary** (planned): local LLM generates a commentary script for a
   selected clip → local TTS renders voice audio → FFmpeg mixes it into the
   final video, so the system never just reposts raw clips.
+
+## Pipeline (current scripts, in order)
+
+The repo has **9 script files total in `scripts/`**, but only 4 are the
+active pipeline today (table below). The rest — including a same-numbered
+`05_smart_video_analysis.py` — are legacy/reference only; see the note
+under the table.
+
+| Step | Script | Purpose |
+|---|---|---|
+| 1 | `scripts/05_extract_keyframes.py` | Extract candidate keyframes locally (base sampling + motion + audio energy + scene-change), dedup near-identical frames. Output: `manifest.json` |
+| 2 | `scripts/06_score_moments.py` | Score keyframes by which local signals fired, merge nearby frames into candidate time-range **events**. Output: `events.json` |
+| 3 | `scripts/07_describe_moments.py` | Send each event's peak frame to Gemini 3.6 Flash for a neutral visual description. Checkpointed/cached to survive small free-tier quotas. Output: `events_described.json` |
+| 4 | `scripts/08_select_moments.py` | Filter out non-content events, optionally blend in transcript overlap + local Ollama judgment, rank final candidate clips. Output: `selected_clips.json` |
+| 5 | *(next)* | Cut, crop to 9:16, and encode the selected clips — pure FFmpeg, no AI calls |
+
+**Note on `05_*`:** there are two scripts starting with `05` in `scripts/`.
+Only `05_extract_keyframes.py` is active. `05_smart_video_analysis.py` is
+the pre-restructure legacy version it replaced — its event-grouping idea
+was carried forward into `06_score_moments.py`, but the script itself is
+not called by anything and should not be run.
+
+Legacy/reference only (superseded, not run in the active pipeline):
+`scripts/01_basic_clip.py` / `.bat`, `02_multi_clips.py`, `03_transcribe.py`
+(faster-whisper — still the intended transcription source, just not yet
+wired into the pipeline as a script call), `04_auto_select_clips.py`,
+`05_smart_video_analysis.py`.
 
 ## Current status
 
 ### Done
 
-- Project brief and architecture finalized (this document).
-- **Smart local keyframe extractor** (`scripts/05_extract_keyframes.py`)
-  — implemented and tested against a real ~3-minute video:
-  - Combines base sampling + motion detection + audio energy + scene-change
-    detection.
-  - Merges/caps candidates and removes near-duplicate frames via perceptual
-    hashing.
-  - Outputs a `manifest.json` per run listing every kept frame's timestamp
-    and which signal(s) triggered it.
-  - Verified end-to-end run: 189s video → 212 raw candidates → 150 after
-    merge/cap → 106 kept after dedup.
+- Project brief and architecture finalized.
+- Steps 1–4 above implemented and **verified end-to-end on a real ~3-minute
+  video**: 189s video → 212 raw signal candidates → 150 after merge/cap →
+  106 keyframes kept after dedup → grouped into events → 4 events described
+  by Gemini 3.6 Flash → 3 usable clips ranked after filtering out 1 title
+  card.
+- Vision descriptions confirmed accurate on real footage, including
+  correctly identifying and excluding a title/outro card as non-content.
 - Initial `app/` package scaffolding created (`app/core`, `app/media`,
   `app/ai/providers`, `app/pipeline`, `app/cli.py`, `run_icf.py`) as the
-  foundation for the content-agnostic core architecture, alongside legacy
-  reference scripts (`scripts/02_multi_clips.py`, `03_transcribe.py`,
-  `04_auto_select_clips.py`, `05_smart_video_analysis.py`).
+  foundation for wiring the scripts above into a single application later.
 
 ### Remaining
 
-- Reconcile `scripts/05_smart_video_analysis.py` (legacy) with the new
-  `scripts/05_extract_keyframes.py` — confirm no duplicated responsibility.
-- Build the **vision description step**: send surviving keyframes to Gemini
-  Flash free tier (or a local vision model later) and capture per-keyframe
-  descriptions.
-- Build **moment scoring/selection**: combine vision descriptions +
-  transcript (faster-whisper) + audio energy into a ranked list of best
-  moments with timestamp, reason, and hook.
-- Integrate the keyframe extractor and upcoming vision/scoring steps into the
-  `app/pipeline/` architecture (currently only scaffolding exists).
-- Automatic editing engine (smart crop, 9:16 conversion, subject positioning,
-  zoom/pan, animated captions, hook/ending text) via FFmpeg.
+- Wire `03_transcribe.py`'s output into `08_select_moments.py`'s
+  `--transcript` option (confirm output format matches; not yet tested
+  together).
+- Build the **clip-cutting step**: pure FFmpeg, takes `selected_clips.json`
+  start/end timestamps, crops/resizes to 9:16, encodes final clip files.
+- Automatic editing engine (smart crop/subject positioning, zoom/pan,
+  animated captions, hook/ending text) via FFmpeg.
 - AI commentary generation (local LLM script → local TTS → FFmpeg mix).
 - Title/description/hashtag generation per Short.
+- Integrate all steps into the `app/pipeline/` architecture (currently only
+  scaffolding exists; scripts are run manually and separately today).
 - Manual-inspection step before any YouTube upload; YouTube API integration
   deferred until the generation pipeline is reliable.
 
