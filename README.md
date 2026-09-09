@@ -72,6 +72,9 @@ under the table.
 | 3 | `scripts/07_describe_moments.py` | Send each event's peak frame to Gemini 3.6 Flash for a neutral visual description. Checkpointed/cached to survive small free-tier quotas. Output: `events_described.json` |
 | 4 | `scripts/08_select_moments.py` | Filter out non-content events, optionally blend in transcript overlap + local Ollama judgment, rank final candidate clips. Output: `selected_clips.json` |
 | 5 | `scripts/09_cut_clips.py` | Cut, crop to 9:16, and encode the selected clips — pure FFmpeg, no AI calls |
+| 6 | `scripts/10_add_captions.py` | Re-time transcript segments to each clip's local timeline and burn synced captions — pure FFmpeg |
+| 7 | `scripts/11_add_commentary.py` | Generate a short voiceover line (local Ollama, or vision description as fallback), render with local TTS (pyttsx3), mix into clip audio |
+| 8 | `scripts/12_generate_metadata.py` | Generate title/description/hashtags per clip (local Ollama, or templated fallback) |
 
 **Note on `05_*`:** there are two scripts starting with `05` in `scripts/`.
 Only `05_extract_keyframes.py` is active. `05_smart_video_analysis.py` is
@@ -101,15 +104,29 @@ wired into the pipeline as a script call), `04_auto_select_clips.py`,
   producing 3 final, playable, correctly-cropped 9:16 clips (no distortion,
   confirmed visually) with no manual intervention beyond running each
   script in order.
+- **Steps 6–8 (captions, commentary, metadata) run end-to-end on the same
+  3 real clips**: synced captions burned in correctly, a local-LLM-or-fallback
+  voiceover line generated and mixed into each clip's audio via local TTS
+  (pyttsx3 + espeak-ng), and title/description/hashtags generated for all 3
+  (currently via the templated fallback, since Ollama isn't running yet in
+  that environment — output is still usable, just less creative than an
+  LLM pass would produce).
+  - Known harmless issue: pyttsx3's espeak driver prints a
+    `ReferenceError` traceback per synthesized line on this Python
+    version; it does not affect output — each `.wav` file is still
+    written correctly. Cosmetic only, safe to ignore for now.
 - Initial `app/` package scaffolding created (`app/core`, `app/media`,
   `app/ai/providers`, `app/pipeline`, `app/cli.py`, `run_icf.py`) as the
   foundation for wiring the scripts above into a single application later.
 
 ### Remaining
 
+- Set up local Ollama (with a model pulled) so steps 4, 7, and 8 use real
+  LLM reasoning instead of their heuristic/templated fallbacks — everything
+  already works without it, this is a quality upgrade, not a blocker.
 - Wire `03_transcribe.py`'s output into `08_select_moments.py`'s
-  `--transcript` option (confirm output format matches; not yet tested
-  together).
+  `--transcript` option for the scoring bonus (it's already used
+  successfully by steps 6–7, just not yet passed into step 4's scoring).
 - **Disk-space housekeeping.** Every run writes real files into
   `output/keyframes/frames/`, `output/events/`, `output/final_clips/`, plus
   any transcript/temp folders — these grow every run and are never cleaned
