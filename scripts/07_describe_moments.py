@@ -138,7 +138,11 @@ def main():
         # Use the peak frame -- the frame with the highest local score --
         # as the single representative image for this event.
         peak_frame = max(event["frames"], key=lambda f: f["score"])
-        image_path = peak_frame["path"]
+        image_path = peak_frame.get("path")
+
+        if not image_path:
+            print(f"  [{eid}] skipped -- no real frame available for this scene (too short)")
+            continue
 
         if not Path(image_path).exists():
             print(f"  [{eid}] skipped -- frame file missing: {image_path}")

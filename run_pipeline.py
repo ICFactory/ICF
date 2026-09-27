@@ -142,9 +142,8 @@ def main():
         run_stage([
             sys.executable, str(SCRIPTS_DIR / "06_score_moments.py"),
             "--manifest", str(keyframes_manifest),
+            "--video", str(video),
             "--out", str(output_dir / "events"),
-            "--window-before", str(cfg["analysis"]["event_padding_before"]),
-            "--window-after", str(cfg["analysis"]["event_padding_after"]),
         ], 2, STAGE_NAMES[2])
 
     if 3 in stages_to_run:
@@ -215,5 +214,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
     

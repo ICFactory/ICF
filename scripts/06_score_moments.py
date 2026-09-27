@@ -2,35 +2,44 @@
 """
 06_score_moments.py
 --------------------
-Local moment-scoring step for the Video-to-Shorts pipeline.
+Scene-segmentation step for the Video-to-Shorts pipeline.
 
-Reads the manifest.json produced by 05_extract_keyframes.py and turns the
-flat list of scored keyframes into candidate EVENTS: merged time ranges
-(start/end) with a peak score, ready to hand to the vision-description step
-and, later, to transcript-based scoring.
+IMPORTANT DESIGN NOTE: this video is a COMPILATION of separately shot
+scenes with real hard cuts -- not one continuous take with occasional
+"highlight moments." So this step does not merge/pad around interesting
+peaks. Instead it:
 
-This replaces the event-grouping logic that used to live inside
-scripts/05_smart_video_analysis.py (legacy) -- but instead of recomputing
-motion/scene/audio signals itself, it reuses the already-computed, already
--deduplicated frames and their source tags from the keyframe extractor.
+    1. Detects real scene-cut timestamps DIRECTLY from the original video
+       (independently of the keyframe manifest -- see below for why).
+    2. Treats every interval between two consecutive cuts as ONE scene =
+       ONE candidate clip, using its exact start/end. No padding.
+    3. Scores each scene using the keyframe manifest's per-frame signal
+       data (motion/audio/scene/base), purely to rank scenes and pick a
+       representative frame for vision description -- scoring never
+       changes the scene's start/end.
 
-Content-agnostic: scoring is based purely on which local signals fired
-(motion / audio / scene / base), never on what the content "is".
+Why detect boundaries directly from the video instead of reusing the
+"scene" tags already in manifest.json: 05_extract_keyframes.py clusters
+nearby candidate timestamps together and later deduplicates near-identical
+frames. A frame sitting exactly on a hard cut can get merged into a
+nearby base-sampled timestamp and then get dropped entirely if it closely
+resembles a neighboring frame from the same original scene. That's fine
+for "find interesting moments" but not precise enough to be a scene
+BOUNDARY. Re-running scene detection here, decoupled from dedup, keeps
+boundaries exact.
 
 Usage:
     python 06_score_moments.py --manifest output/keyframes/manifest.json \
-        --out output/events
+        --video input/long_video.mp4.mp4 --out output/events
 """
 
 import argparse
 import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 
-
-# --------------------------------------------------------------------------- #
-# Signal weights -- how much each source contributes to a frame's score.
-# A frame flagged by multiple signals is more likely to be a real moment.
-# --------------------------------------------------------------------------- #
 
 SOURCE_WEIGHTS = {
     "audio": 2.0,
@@ -38,10 +47,38 @@ SOURCE_WEIGHTS = {
     "motion": 1.5,
     "base": 0.5,
 }
-
-# Bonus per additional corroborating signal beyond the first (rewards
-# frames where multiple independent signals agree).
 CORROBORATION_BONUS = 1.0
+
+
+def run(cmd):
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return result.returncode, result.stdout, result.stderr
+
+
+def detect_scene_boundaries(video_path, duration, threshold, min_scene_duration):
+    """Detect hard cut timestamps directly from the video (decoupled from
+    the keyframe manifest's dedup), then turn them into scene start/end
+    boundaries covering the whole video from 0 to duration."""
+    code, out, err = run([
+        "ffmpeg", "-i", video_path,
+        "-vf", f"select='gt(scene,{threshold})',showinfo",
+        "-f", "null", "-",
+    ])
+    cut_timestamps = sorted(set(round(float(m), 3) for m in re.findall(r"pts_time:([\d.]+)", err)))
+
+    boundaries = [0.0] + [t for t in cut_timestamps if 0.0 < t < duration] + [duration]
+    boundaries = sorted(set(boundaries))
+
+    # Merge boundaries that are too close together (noise / near-zero-length
+    # slivers) by dropping the inner boundary, extending the previous scene.
+    merged = [boundaries[0]]
+    for b in boundaries[1:]:
+        if b - merged[-1] < min_scene_duration:
+            continue
+        merged.append(b)
+    if merged[-1] < duration:
+        merged[-1] = duration
+    return merged
 
 
 def score_frame(sources):
@@ -51,111 +88,110 @@ def score_frame(sources):
     return round(base_score + bonus, 3)
 
 
-def group_into_events(frames, window_before, window_after, min_gap, duration):
-    """
-    Merge scored frames into events (time ranges), the same way nearby
-    detections were merged in the legacy analyzer -- but operating on
-    already-deduplicated keyframes instead of raw per-sample signals.
-    """
-    frames = sorted(frames, key=lambda f: f["timestamp"])
-    events = []
+def build_scenes(boundaries, scored_frames, video_path):
+    scenes = []
+    for i in range(len(boundaries) - 1):
+        start, end = boundaries[i], boundaries[i + 1]
+        frames_in_scene = [f for f in scored_frames if start <= f["timestamp"] < end]
 
-    for f in frames:
-        center = f["timestamp"]
-        placed = False
+        if not frames_in_scene:
+            # Very short scene with no base/motion/audio/scene keyframe landed
+            # inside it -- extract one frame directly so scoring/vision still
+            # has something to work with.
+            mid = (start + end) / 2
+            fallback_path = None
+            frames_in_scene = [{
+                "timestamp": round(mid, 3),
+                "sources": ["fallback"],
+                "score": 0.5,
+                "path": fallback_path,
+            }]
 
-        for event in events:
-            if event["start"] - min_gap <= center <= event["end"] + min_gap:
-                event["frames"].append(f)
-                event["start"] = min(event["start"], max(0.0, center - window_before))
-                event["end"] = min(duration, max(event["end"], center + window_after))
-                if f["score"] > event["peak_score"]:
-                    event["peak_score"] = f["score"]
-                    event["peak_time"] = center
-                placed = True
-                break
-
-        if not placed:
-            events.append({
-                "start": max(0.0, center - window_before),
-                "end": min(duration, center + window_after),
-                "peak_time": center,
-                "peak_score": f["score"],
-                "frames": [f],
-            })
-
-    events.sort(key=lambda e: e["start"])
-    return events
+        scenes.append({
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "frames": frames_in_scene,
+        })
+    return scenes
 
 
-def finalize_events(events):
-    for i, e in enumerate(events, 1):
-        frames = e["frames"]
+def finalize_scenes(scenes):
+    for i, s in enumerate(scenes, 1):
+        frames = [f for f in s["frames"] if f.get("path")]
+        if not frames:
+            frames = s["frames"]  # keep fallback placeholder even without a real path
+
         source_counts = {}
         for f in frames:
-            for s in f["sources"]:
-                source_counts[s] = source_counts.get(s, 0) + 1
+            for src in f["sources"]:
+                source_counts[src] = source_counts.get(src, 0) + 1
 
-        e["id"] = f"event_{i:03d}"
-        e["duration"] = round(e["end"] - e["start"], 3)
-        e["peak_score"] = round(e["peak_score"], 3)
-        e["total_score"] = round(sum(f["score"] for f in frames), 3)
-        e["frame_count"] = len(frames)
-        e["source_counts"] = source_counts
-        e["frames"] = [
-            {"timestamp": f["timestamp"], "sources": f["sources"],
-             "score": f["score"], "path": f["path"]}
+        peak_frame = max(frames, key=lambda f: f["score"])
+
+        s["id"] = f"event_{i:03d}"
+        s["duration"] = round(s["end"] - s["start"], 3)
+        s["peak_time"] = peak_frame["timestamp"]
+        s["peak_score"] = round(peak_frame["score"], 3)
+        s["total_score"] = round(sum(f["score"] for f in frames), 3)
+        s["frame_count"] = len(frames)
+        s["source_counts"] = source_counts
+        s["frames"] = [
+            {"timestamp": f["timestamp"], "sources": f["sources"], "score": f["score"], "path": f.get("path")}
             for f in frames
         ]
-    return events
+    return scenes
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Score and group keyframes into candidate moments")
+    parser = argparse.ArgumentParser(description="Segment a compilation video into real scenes and score them")
     parser.add_argument("--manifest", required=True, help="Path to manifest.json from 05_extract_keyframes.py")
+    parser.add_argument("--video", required=True, help="Path to the original source video (for direct scene detection)")
     parser.add_argument("--out", required=True, help="Output directory")
-    parser.add_argument("--window-before", type=float, default=2.0,
-                         help="Seconds to pad before a peak when forming an event")
-    parser.add_argument("--window-after", type=float, default=3.0,
-                         help="Seconds to pad after a peak when forming an event")
-    parser.add_argument("--min-gap", type=float, default=2.5,
-                         help="Merge events whose padded ranges are within this many seconds of each other")
-    parser.add_argument("--max-events", type=int, default=50,
-                         help="Cap on number of events kept, ranked by peak score")
+    parser.add_argument("--scene-threshold", type=float, default=0.4,
+                         help="ffmpeg scene-change sensitivity; lower catches more/softer cuts")
+    parser.add_argument("--min-scene-duration", type=float, default=1.0,
+                         help="Scenes shorter than this get merged into the previous one (noise filter)")
+    parser.add_argument("--max-scene-warning", type=float, default=40.0,
+                         help="Print a warning for any scene longer than this, since it may mean a cut was missed")
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest)
     if not manifest_path.exists():
-        raise SystemExit(f"ERROR: manifest not found: {manifest_path}")
+        sys.exit(f"ERROR: manifest not found: {manifest_path}")
+    if not Path(args.video).exists():
+        sys.exit(f"ERROR: video not found: {args.video}")
 
     manifest = json.loads(manifest_path.read_text())
     duration = manifest.get("duration_sec", 0.0)
     raw_frames = manifest.get("frames", [])
-
     if not raw_frames:
-        raise SystemExit("ERROR: manifest has no frames to score.")
+        sys.exit("ERROR: manifest has no frames to score.")
 
-    print(f"[1/3] Scoring {len(raw_frames)} keyframes ...")
-    scored = []
-    for f in raw_frames:
-        scored.append({
-            "timestamp": f["timestamp"],
-            "sources": f["sources"],
-            "path": f["path"],
-            "score": score_frame(f["sources"]),
-        })
+    print(f"[1/3] Detecting scene-cut boundaries directly from the video ...")
+    boundaries = detect_scene_boundaries(args.video, duration, args.scene_threshold, args.min_scene_duration)
+    print(f"      {len(boundaries) - 1} scene(s) detected "
+          f"(cuts at: {[round(b, 2) for b in boundaries[1:-1]]})")
 
-    print(f"[2/3] Grouping into candidate events ...")
-    events = group_into_events(
-        scored, args.window_before, args.window_after, args.min_gap, duration
-    )
-    events = finalize_events(events)
-    print(f"      {len(events)} raw events before capping")
+    print(f"[2/3] Scoring keyframes and assigning them to scenes ...")
+    scored_frames = [{
+        "timestamp": f["timestamp"],
+        "sources": f["sources"],
+        "path": f["path"],
+        "score": score_frame(f["sources"]),
+    } for f in raw_frames]
 
-    if len(events) > args.max_events:
-        events.sort(key=lambda e: e["peak_score"], reverse=True)
-        events = events[:args.max_events]
-        events.sort(key=lambda e: e["start"])
+    scenes = build_scenes(boundaries, scored_frames, args.video)
+    scenes = finalize_scenes(scenes)
+
+    long_scenes = [s for s in scenes if s["duration"] > args.max_scene_warning]
+    if long_scenes:
+        print(f"      WARNING: {len(long_scenes)} scene(s) exceed {args.max_scene_warning}s "
+              f"-- a real cut may have been missed. Consider lowering --scene-threshold. "
+              f"IDs: {[s['id'] for s in long_scenes]}")
+
+    durations = [s["duration"] for s in scenes]
+    print(f"      scene durations -- min: {min(durations):.1f}s, "
+          f"max: {max(durations):.1f}s, avg: {sum(durations)/len(durations):.1f}s")
 
     print(f"[3/3] Writing events.json ...")
     out_dir = Path(args.out)
@@ -167,15 +203,15 @@ def main():
         "duration_sec": duration,
         "settings": vars(args),
         "total_input_frames": len(raw_frames),
-        "total_events": len(events),
-        "events": events,
+        "total_events": len(scenes),
+        "events": scenes,
     }
 
     events_path = out_dir / "events.json"
     events_path.write_text(json.dumps(output, indent=2))
 
     print()
-    print(f"Done. {len(events)} candidate events written.")
+    print(f"Done. {len(scenes)} scene(s) written as candidate clips.")
     print(f"Events: {events_path}")
 
 
